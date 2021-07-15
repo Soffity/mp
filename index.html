@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>player</title>
+    <script src="id3-minimized.js">
+
+    </script>
+    <script src="easeljs.js">
+
+    </script>
+
+</head>
+
+<body>
+    <canvas id='cns' width="700" height="700"></canvas>
+    <!-- <div hidden> -->
+    <div>
+        <input id='f_inp' type="file" accept="audio/*" multiple />
+        <audio preload="auto" controls id='outa'></audio>
+    </div>
+    <script>
+        // функция получения среднего цвета картинки
+        function getAVGCOL(img) {
+            let col = { r: 0, g: 0, b: 0 };
+            let can = document.createElement('canvas');
+            can.width = 2;
+            can.height = 2;
+            
+            let cct = can.getContext('2d');
+
+            cct.drawImage(img, 0, 0, 1, 1);
+
+            let dt = cct.getImageData(0, 0, 1, 1);
+
+            col.r = dt.data[0];
+            col.g = dt.data[1];
+            col.b = dt.data[2];
+            return col;
+        }
+        // преопределение всех нужный переменных
+        let bg, blur, circ, rgb, vol, anal, pausebtn, playbtn;
+        // Метакеш - массив кешированных данных для всех песен
+        let MetaCache = [];
+        // Количество загруженных песен
+        let songs_count = 0;
+        // Изначальный радиус Круга
+        let radius = 180;
+        // Канвас
+        let cns = document.getElementById('cns');
+        // Выбранный трек
+        let sel = 0;
+        // высота ширина
+        let w = cns.width;
+        let h = cns.height;
+
+        // Формирование начального экрана
+        let stg = new createjs.Stage(cns);
+        let ttl = new createjs.Text('Select files:', "40px Arial", "#060010");
+        ttl.x = w / 2 - 100;
+        ttl.y = h / 4;
+        let btn = new createjs.Shape();
+        btn.graphics.f('lightgray').rr(0, 0, w / 3, 50, 10, 10, 10, 10);
+        btn.x = w / 2 - (w / 3 / 2);
+        btn.y = h / 2;
+        btn.addEventListener('click', function (e) {
+            document.getElementById('f_inp').click();
+        })
+        stg.addChild(btn, ttl);
+        stg.update();
+
+        // Создание контекста и аудио
+        let audioel = document.getElementById('outa');
+        let cnt = new AudioContext();
+        anal = cnt.createAnalyser();
+        // Качество анализа
+        anal.fftSize = 32;
+        // РАЗМЫВАНИЕ ЗВУКА ПРИ АНАЛИЗЕ
+        anal.smoothingTimeConstant = 0.3;
+        // Массив частот
+        vol = new Uint8Array(anal.frequencyBinCount);
+        // Подключение нодов
+        audioel.oncanplay = () => {
+            let mel = cnt.createMediaElementSource(audioel);
+            mel.connect(anal);
+            anal.connect(cnt.destination);
+        };
+        // При окончании трека переключатся на следущий
+        audioel.onended = () => {
+            let n = sel + 1 == songs_count ? 0 : sel + 1;
+            setTrack(n);
+            audioel.play();
+        }
+
+        function pause() {
+            audioel.pause();
+            stg.removeChild(playbtn);
+            stg.addChild(pausebtn);
+        }
+
+        function play() {
+            audioel.play();
+            stg.removeChild(pausebtn);
+            stg.addChild(playbtn);
+        }
+
+        /* Установить трек номер num */
+        function setTrack(num) {
+            sel = num;
+            let Data = MetaCache[sel];
+            rgb = Data.rgb;
+            circ = Data.circ;
+            audioel.src = Data.href;
+            stg.removeAllChildren();
+
+            pausebtn = new createjs.Shape();
+            pausebtn.graphics.f('white').lt(0, 30).lt(30, 15).lt(0,0).ef();
+            pausebtn.x = w / 2 - 15;
+            pausebtn.y = h / 2 + 130;
+            pausebtn.addEventListener('click', play)
+
+            playbtn = new createjs.Shape();
+            playbtn.graphics.f('white').lt(0,30).lt(12,30).lt(12,0).lt(0,0).mt(18,0).lt(18,30).lt(30,30).lt(30,0).lt(18,0).ef();
+            playbtn.x = w / 2 - 15;
+            playbtn.y = h / 2 + 130;
+            playbtn.addEventListener('click', pause);
+
+            stg.addChild(Data.bg);
+            stg.addChild(Data.circ);
+            stg.addChild(Data.cover);
+            stg.addChild(Data.sname);
+            stg.addChild(Data.sartist);
+            stg.addChild(pausebtn);
+            draw();
+        }
+        // Кешировать файл
+        function cacheSong(file) {
+            let promise = new Promise(function (resolve) {
+                let reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = async () => {
+                    let constr = {};
+                    constr.href = reader.result
+                    ID3.loadTags(reader.result, async () => {
+                        let tgs = ID3.getAllTags(reader.result);
+                        constr.artist = tgs.artist;
+                        constr.title = tgs.title;
+                        image = tgs.picture;
+                        let img = new Image();
+                        if (constr.artist == undefined) {
+                            constr.artist = '';
+                        }
+                        if (constr.title == undefined) {
+                            constr.title = file.name;
+                        }
+                        if (image == undefined) {
+                            img.src = './default.png'
+                        }
+                        else {
+                            var base64String = "";
+                            for (var i = 0; i < image.data.length; i++) {
+                                base64String += String.fromCharCode(image.data[i]);
+                            }
+                            var dataUrl = "data:" + image.format + ";base64," + window.btoa(base64String);
+                            img.src = dataUrl
+                        }
+                        img.onload = function () {
+                            let shad = new createjs.Shadow('black', 0, 0, 10);
+                            bg = new createjs.Bitmap(img);
+                            bg.cache(0, 0, bg.image.width, bg.image.height)
+                            blur = new createjs.BlurFilter(30, 30, 3);
+                            bg.scaleX = w / bg.image.width;
+                            bg.scaleY = h / bg.image.height;
+                            let bounds = blur.getBounds();
+                            bg.filters = [blur];
+                            bg.cache(-bounds.x, -bounds.y, bg.image.width + bounds.x, bg.image.height + bounds.y);
+                            constr.bg = bg;
+
+                            circ = new createjs.Shape();
+                            rgb = getAVGCOL(img);
+                            constr.rgb = rgb;
+                            circ.graphics.f(`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`).dc(w / 2, h / 3, radius);
+                            constr.circ = circ;
+
+                            let song_name = new createjs.Text(constr.title, "40px Arial", '#fafaf4');
+                            song_name.x = w / 2;
+                            song_name.y = h / 3 + 150;
+                            song_name.textAlign = 'center'
+                            constr.sname = song_name;
+
+                            let song_artist = new createjs.Text(constr.artist, "20px Arial", '#fafaf4');
+                            song_artist.x = w / 2;
+                            song_artist.y = h / 3 + 195;
+                            song_artist.textAlign = 'center'
+                            constr.sartist = song_artist;
+
+                            let cover = new createjs.Bitmap(img);
+                            cover.scaleX = 200 / cover.image.width;
+                            cover.scaleY = 200 / cover.image.height;
+                            cover.x = w / 2 - 100;
+                            cover.y = h / 3 - 100;
+                            cover.snapToPixel = false;
+                            cover.shadow = shad;
+                            constr.cover = cover;
+                            resolve(constr);
+                        }
+                    }, { tags: ["picture", "title", "artist"] })
+                };
+            });
+            return promise;
+        };
+        // Открытие и кеш всех выбранных файлов
+        async function openFiles() {
+            let flist = document.getElementById('f_inp').files;
+            songs_count = flist.length;
+            let audioel = document.getElementById('outa');
+            for (const file of flist) {
+                let d = await cacheSong(file);
+                MetaCache.push(d);
+            }
+            setTrack(0);
+        }
+        // Предыдущий радиус
+        let prev_r = radius;
+        // Функция рисование
+        function draw() {
+            // Получение номера кадра
+            let frame = requestAnimationFrame(draw);
+            // Чередование кадров
+            if (frame % 6 == 0) {
+                // Действия выполняемые только на каждый 6 кадр
+                // получение массива частот
+                anal.getByteFrequencyData(vol);
+                // нахождение средней громкости (.toFixed() обрезает число на определённое количество знаков после запятой(Чем больше - тем сильнее дергается))
+                let av = ((vol.reduce((a, b) => (a + b)) / vol.length) / 128).toFixed(2);
+                // установка предыдущего радиуса
+                prev_r = radius * av;
+                // рисование круга
+                circ.graphics.c().f(`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`).dc(w / 2, h / 3, prev_r);
+            }
+            else {
+                // Действия выполняемые в остальные кадры
+                // уменьшение радиуса в 0.991 раз
+                prev_r *= 0.991
+                // рисование круга
+                circ.graphics.c().f(`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`).dc(w / 2, h / 3, prev_r)
+            }
+
+            /*
+                Далее закомментирован иной метод рисования:
+                    - Рисование каждый кадр
+                    - Нет уменьшения радиуса
+                (если захочешь его расскомментировань то закоментируй предыдущий)
+            */
+
+            // anal.getByteFrequencyData(vol);
+            // let av = ((vol.reduce((a, b) => (a + b)) / vol.length) / 128).toFixed(2);
+            // let r = radius * av;
+            // circ.graphics.c().f(`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`).dc(w / 2, h / 3, r);
+
+            stg.update();
+
+        }
+
+        document.getElementById('f_inp').addEventListener('change', function () {
+            openFiles();
+        })
+    </script>
+</body>
+
+</html>
